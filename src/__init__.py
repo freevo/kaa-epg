@@ -1,47 +1,47 @@
-# -*- coding: iso-8859-1 -*-
-# -----------------------------------------------------------------------------
-# __init__.py - interface to kaa.epg
-# -----------------------------------------------------------------------------
-# $Id$
-#
-# -----------------------------------------------------------------------------
-# kaa-epg - Python EPG module
-# Copyright (C) 2002-2005 Dirk Meyer, Rob Shortt, et al.
-#
-# First Edition: Dirk Meyer <dmeyer@tzi.de>
-# Maintainer:    Dirk Meyer <dmeyer@tzi.de>
-#
-# Please see the file docs/CREDITS for a complete list of authors.
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MER-
-# CHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-# Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-#
-# -----------------------------------------------------------------------------
+import os
+import logging
+from socket import gethostbyname, gethostname
 
-# kaa.epg imports
-from guide import Guide
+from kaa import ipc
+from client import *
+from server import *
+from channel import Channel
 from program import Program
-from schema import *
 
-# create guide
-guide = Guide()
+__all__ = [ 'connect', 'Channel', 'Program', 'DEFAULT_EPG_PORT', 'GuideClient', 'GuideServer' ]
 
-# set kaa.epg variables
-connect           = guide.connect
-load              = guide.load
-update            = guide.update
-get_channel       = guide.get_channel
-get_channel_by_id = guide.get_channel_by_id
-search            = guide.search
-channels          = guide.channel_list
+# connected client object
+_client = None
+
+def connect(epgdb, address='127.0.0.1', logfile='/tmp/kaa-epg.log', loglevel=logging.INFO):
+    """
+    """
+    global _client
+
+    if _client and _client.ping() != False:
+        return _client
+
+    if address.split(':')[0] not in ['127.0.0.1', '0.0.0.0'] and \
+       address.split(':')[0] != gethostbyname(gethostname()):
+        # epg is remote:  host:port
+        if address.find(':') >= 0:
+            host, port = address.split(':', 1)
+        else:
+            host = address
+            port = DEFAULT_EPG_PORT
+
+        # create socket, pass it to client
+        _client = GuideClient((host, int(port)))
+
+    else:
+        # EPG is local, only use unix socket
+
+        # get server filename
+        server = os.path.join(os.path.dirname(__file__), 'server.py')
+
+        _client = ipc.launch([server, logfile, str(loglevel), epgdb, address], 
+                              5, GuideClient, "epg")
+
+    return _client
+
+

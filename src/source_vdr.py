@@ -1,8 +1,8 @@
 # -*- coding: iso-8859-1 -*-
 # -----------------------------------------------------------------------------
-# source_vdr.py - Electronic Program Guide module for VDR
+# source_vdr.py - Get EPG information from VDR.
 # -----------------------------------------------------------------------------
-# $Id$
+# $Id: $
 #
 # -----------------------------------------------------------------------------
 # kaa-epg - Python EPG module
@@ -34,66 +34,99 @@ import os
 import string
 import logging
 
+# kaa imports
+from kaa import strutils
+import kaa.notifier
+
 # vdr imports
 from vdr.vdr import VDR
 
 # get logging object
 log = logging.getLogger('epg')
 
-def update(guide, vdr_dir=None, channels_file=None, epg_file=None,
-           host=None, port=None, access_by='sid', limit_channels=''):
+
+class UpdateInfo:
+    pass
+
+def _update_data_thread(epg, vdr_dir=None, channels_file=None, epg_file=None,
+                        host=None, port=None, access_by='sid', 
+                        limit_channels='conf', exclude_channels=None):
     """
     Update the guide.
     """
-    exclude_channels = guide.exclude_channels
+    log.debug('_update_data_thread')
+
+    info = UpdateInfo()
+    info.total = 0
+
     if not (isinstance(exclude_channels, list) or \
             isinstance(exclude_channels, tuple)):
         exclude_channels = []
 
     log.info('excluding channels: %s' % exclude_channels)
 
-    vdr = VDR(host=host, port=port, videopath=vdr_dir,
-              channelsfile=channels_file, epgfile=epg_file,
-              close_connection=0)
+    info.vdr = VDR(host=host, port=port, videopath=vdr_dir,
+                   channelsfile=channels_file, epgfile=epg_file,
+                   close_connection=0)
 
-    if vdr.epgfile and os.path.isfile(vdr.epgfile):
-        log.info('Using VDR EPG from %s.' % vdr.epgfile)
-        if os.path.isfile(vdr.channelsfile):
-            vdr.readchannels()
+    if info.vdr.epgfile and os.path.isfile(info.vdr.epgfile):
+        log.info('Using VDR EPG from %s.' % info.vdr.epgfile)
+        if os.path.isfile(info.vdr.channelsfile):
+            info.vdr.readchannels()
         else:
-            log.warning('VDR channels file not found: %s.' % vdr.channelsfile)
-        vdr.readepg()
-    elif vdr.host and vdr.port:
-        log,info('Using VDR EPG from %s:%s.' % (vdr.host, vdr.port))
-        vdr.retrievechannels()
-        vdr.retrieveepg()
+            log.warning('VDR channels file not found: %s.' % info.vdr.channelsfile)
+        info.vdr.readepg()
+    elif info.vdr.host and info.vdr.port:
+        log.info('Using VDR EPG from %s:%s.' % (info.vdr.host, info.vdr.port))
+        info.vdr.retrievechannels()
+        info.vdr.retrieveepg()
     else:
         log.info('No source for VDR EPG.')
         return False
 
+    for c in info.vdr.channels.values():
+        for e in c.events:
+            info.total += 1
 
-    chans = vdr.channels.values()
+    info.access_by        = access_by
+    info.limit_channels   = limit_channels
+    info.exclude_channels = exclude_channels
+    info.cur              = 0
+    info.epg              = epg
+    info.progress_step    = info.total / 100
+
+    timer = kaa.notifier.Timer(_update_process_step, info)
+    timer.set_prevent_recursion()
+    timer.start(0)
+
+
+def _update_process_step(info):
+
+    chans = info.vdr.channels.values()
     for c in chans:
-        if c.id in exclude_channels:  continue
+        if c.id in info.exclude_channels:  continue
 
-        if string.lower(limit_channels) == 'epg' and not c.in_epg:
+        if string.lower(info.limit_channels) == 'epg' and not c.in_epg:
             continue
-        elif string.lower(limit_channels) == 'conf' and not c.in_conf:
+        elif string.lower(info.limit_channels) == 'conf' and not c.in_conf:
             continue
-        elif string.lower(limit_channels) == 'both' and \
+        elif string.lower(info.limit_channels) == 'both' and \
                  not (c.in_conf and c.in_epg):
             continue
 
-        if access_by == 'name':
+        if info.access_by == 'name':
             access_id = c.name
-        elif access_by == 'rid':
+        elif info.access_by == 'rid':
             access_id = c.rid
         else:
             access_id = c.sid
 
         log.info('Adding channel: %s as %s' % (c.id, access_id))
 
-        guide.sql_add_channel(c.id, c.name, access_id)
+        chan_db_id = info.epg._add_channel_to_db(tuner_id=strutils.str_to_unicode(access_id), 
+                                                 name=strutils.str_to_unicode(c.name), 
+                                                 long_name=None)
+
         for e in c.events:
             subtitle = e.subtitle
             if not subtitle:
@@ -102,6 +135,23 @@ def update(guide, vdr_dir=None, channels_file=None, epg_file=None,
             if not desc:
                 desc = ''
 
-            guide.sql_add_program(c.id, e.title, e.start, int(e.start+e.dur),
-                                  subtitle=subtitle, description=desc)
-    return True
+            info.epg._add_program_to_db(chan_db_id, e.start, int(e.start+e.dur),
+                                        strutils.str_to_unicode(e.title), strutils.str_to_unicode(desc))
+
+            info.cur +=1
+            if info.cur % info.progress_step == 0:
+                info.epg.signals["update_progress"].emit(info.cur, info.total)
+
+    info.epg.signals["update_progress"].emit(info.cur, info.total)
+    return False
+
+
+def update(epg, vdr_dir=None, channels_file=None, epg_file=None,
+           host=None, port=None, access_by='sid', limit_channels=''):
+    log.debug('update')
+
+    thread = kaa.notifier.Thread(_update_data_thread, epg, vdr_dir, 
+                                 channels_file, epg_file, host, port, access_by,
+                                 limit_channels)
+    thread.start()
+

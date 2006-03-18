@@ -1,17 +1,16 @@
 # -*- coding: iso-8859-1 -*-
 # -----------------------------------------------------------------------------
-# setup.py - setup script for kaa.epg
+# setup.py - setup script for kaa.epg2
 # -----------------------------------------------------------------------------
 # $Id$
 #
 # -----------------------------------------------------------------------------
-# kaa-epg - Python EPG module
-# Copyright (C) 2002-2005 Dirk Meyer, Rob Shortt, et al.
+# kaa-epg - Python EPG module (take 2)
+# Copyright (C) 2005 Dirk Meyer, Rob Shortt, Jason Tackaberry, et al.
 #
-# First Edition: Dirk Meyer <dmeyer@tzi.de>
+# First Edition: Jason Tackaberry <tack@sault.org>
 # Maintainer:    Dirk Meyer <dmeyer@tzi.de>
-#
-# Please see the file docs/CREDITS for a complete list of authors.
+#                Jason Tackaberry <tack@sault.org>
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -34,13 +33,13 @@ import sys
 
 try:
     # kaa base imports
-    from kaa.base.distribution import Extension, setup
+    from kaa.distribution import Extension, setup
 except ImportError:
     print 'kaa.base not installed'
     sys.exit(1)
     
 
-setup(module       = 'epg',
+setup(module       = 'epg2',
       version      = '0.1',
       description  = "Python EPG module",
       )

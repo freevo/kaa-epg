@@ -1,62 +1,6 @@
-# -*- coding: iso-8859-1 -*-
-# -----------------------------------------------------------------------------
-# source_xmltv.py - Electronic Program Guide module for XMLTV
-# -----------------------------------------------------------------------------
-# $Id$
-#
-# -----------------------------------------------------------------------------
-# kaa-epg - Python EPG module
-# Copyright (C) 2002-2005 Dirk Meyer, Rob Shortt, et al.
-#
-# First Edition: Dirk Meyer <dmeyer@tzi.de>
-# Maintainer:    Dirk Meyer <dmeyer@tzi.de>
-#                Rob Shortt <rob@tvcentric.com>
-#
-# Please see the file doc/AUTHORS for a complete list of authors.
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MER-
-# CHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
-# Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-#
-# -----------------------------------------------------------------------------
-
-# python imports
-import re
-import time
-import os
-import calendar
-import logging
-import string
-import _strptime as strptime
-
-# kaa.epg imports
-import xmltv
-
-# get logging object
-log = logging.getLogger('epg')
-
-
-EPG_TIME_EXC = 'Time conversion error'
-
-
-def format_text(text):
-    while len(text) and text[0] in (u' ', u'\t', u'\n'):
-        text = text[1:]
-    text = re.sub(u'\n[\t *]', u' ', text)
-    while len(text) and text[-1] in (u' ', u'\t', u'\n'):
-        text = text[:-1]
-    return text
-
+import sys, time, os, calendar
+import kaa.notifier
+from kaa import xml
 
 def timestr2secs_utc(timestr):
     """
@@ -110,116 +54,125 @@ def timestr2secs_utc(timestr):
     return secs
 
 
-def update(guide, XMLTV_FILE):
-    """
-    Load guide data from a raw XMLTV file into the database, parsing using
-    the XMLTV using the xmltv.py support lib.
-    """
-    # Is there a file to read from?
-    if not os.path.isfile(XMLTV_FILE):
-        log.error('%s: file not found' % XMLTV_FILE)
+
+def parse_channel(info):
+    channel_id = info.node.getattr('id')
+    channel = station = name = display = None
+
+    for child in info.node:
+        # This logic expects that the first display-name that appears
+        # after an all-numeric and an all-alpha display-name is going
+        # to be the descriptive station name.  XXX: check if this holds
+        # for all xmltv source.
+        if child.name == "display-name":
+            if not channel and child.content.isdigit():
+                channel = child.content
+            elif not station and child.content.isalpha():
+                station = child.content
+            elif channel and station and not name:
+                name = child.content
+            else:
+                # something else, just remeber it in case we
+                # don't have a name later
+                display = child.content
+
+    if not name:
+        # set name to something. XXX: this is needed for the german xmltv
+        # stuff, maybe others work different. Maybe check the <tv> tag
+        # for the used grabber somehow.
+        name = display or station
+
+    db_id = info.epg._add_channel_to_db(tuner_id=channel, name=station, long_name=name)
+    info.channel_id_to_db_id[channel_id] = [db_id, None]
+
+
+def parse_programme(info):
+    channel_id = info.node.getattr('channel')
+    if channel_id not in info.channel_id_to_db_id:
+        log.warning("Program exists for unknown channel '%s'" % channel_id)
+        return
+
+    title = date = desc = None
+
+    for child in info.node.children:
+        if child.name == "title":
+            title = child.content
+        elif child.name == "desc":
+            desc = child.content
+        elif child.name == "date":
+            fmt = "%Y-%m-%d"
+            if len(child.content) == 4:
+                fmt = "%Y"
+            date = time.mktime(time.strptime(child.content, fmt))
+
+    if not title:
+        return
+
+    start = timestr2secs_utc(info.node.getattr("start"))
+    db_id, last_prog = info.channel_id_to_db_id[channel_id]
+    if last_prog:
+        # There is a previous program for this channel with no stop time,
+        # so set last program stop time to this program start time.
+        # XXX This only works in sorted files. I guess it is ok to force the
+        # user to run tv_sort to fix this. And IIRC tv_sort also takes care of
+        # this problem.
+        last_start, last_title, last_desc = last_prog
+        info.epg._add_program_to_db(db_id, last_start, start, last_title, last_desc)
+    if not info.node.getattr("stop"):
+        info.channel_id_to_db_id[channel_id][1] = (start, title, desc)
+    else:
+        stop = timestr2secs_utc(info.node.getattr("stop"))
+        info.epg._add_program_to_db(db_id, start, stop, title, desc)
+ 
+
+class UpdateInfo:
+    pass
+
+def _update_parse_xml_thread(epg, xmltv_file):
+    doc = xml.Document(xmltv_file, 'tv')
+    channel_id_to_db_id = {}
+    nprograms = 0
+
+    for child in doc:
+        if child.name == "programme":
+            nprograms += 1
+
+    info = UpdateInfo()
+    info.doc = doc
+    info.node = doc.first
+    info.channel_id_to_db_id = channel_id_to_db_id
+    info.total = nprograms
+    info.cur = 0
+    info.epg = epg
+    info.progress_step = info.total / 100
+
+    timer = kaa.notifier.Timer(_update_process_step, info)
+    timer.set_prevent_recursion()
+    timer.start(0)
+    
+
+def _update_process_step(info):
+    t0 = time.time()
+    while info.node:
+        if info.node.name == "channel":
+            parse_channel(info)
+        elif info.node.name == "programme":
+            parse_programme(info)
+            info.cur +=1
+            if info.cur % info.progress_step == 0:
+                info.epg.signals["update_progress"].emit(info.cur, info.total)
+
+        info.node = info.node.get_next()
+        if time.time() - t0 > 0.1:
+            break
+
+    if not info.node:
+        info.epg.signals["update_progress"].emit(info.cur, info.total)
         return False
 
-    exclude_channels = guide.exclude_channels
-    if not (isinstance(exclude_channels, list) or \
-            isinstance(exclude_channels, tuple)):
-        exclude_channels = []
-
-    log.info('excluding channels: %s' % exclude_channels)
-
-    xmltv_channels = None
-
-    try:
-        log.info('Reading XMLTV file')
-        fp = open(XMLTV_FILE)
-        xmltv_attr, xmltv_channels = xmltv.parse(fp)
-    except:
-        fp.close()
-        log.exception('Error reading xmltv file')
-        return False
-
-    # Was the guide read successfully?
-    if not xmltv_channels:
-        log.exception('No channels found')
-        return False
-
-    log.info('Parsing channel list')
-
-    channel_ids = guide.sql_get_channel_ids()
-    for chan in xmltv_channels.values():
-        id = chan['id']
-
-        if id.encode('latin-1', 'ignore') in exclude_channels:
-            continue
-
-        displayname = ''
-        tunerid = ''
-
-        if ' ' in id and len(id.split(' ')) == 2:
-            # Assume the format is "TUNERID CHANNELNAME"
-            tunerid, displayname = id.split(' ')
-        else:
-            displayname = chan['display-name'][0][0]
-            if ' ' in displayname and len(displayname.split(' ')) == 2:
-                tunerid, displayname = displayname.split(' ')
-
-        if tunerid and not tunerid[-1] in string.digits:
-            # oops, that was a wrong choice, revert it
-            displayname = chan['display-name'][0][0]
-            tunerid = ''
-
-        if not tunerid:
-            tunerid = 'REPLACE WITH TUNERID FOR %s' % displayname
-
-        # add or replace channel
-        guide.sql_add_channel(id, displayname, tunerid)
-
-        log.info('Adding programs for %s' % id)
-        for p in chan['programs']:
-            try:
-                channel_id = p['channel']
-                title = p['title'][0][0]
-                episode = ''
-                sub_title = ''
-                desc = ''
-                start = 0
-                stop = 0
-                date = None
-                ratings = {}
-                categories = []
-                advisories = []
-
-                if p.has_key('date'):
-                    date = p['date'][0][0]
-                if p.has_key('category'):
-                    categories = [ cat[0] for cat in p['category'] ]
-                if p.has_key('rating'):
-                    for r in p['rating']:
-                        if r.get('system') == 'advisory':
-                            advisories.append(r.get('value'))
-                            continue
-                        ratings[r.get('system')] = r.get('value')
-                if p.has_key('desc'):
-                    desc = format_text(p['desc'][0][0])
-                if p.has_key('episode-num'):
-                    episode = p['episode-num'][0][0]
-                if p.has_key('sub-title'):
-                    sub_title = p['sub-title'][0][0]
-                try:
-                    start = timestr2secs_utc(p['start'])
-                    try:
-                        stop = timestr2secs_utc(p['stop'])
-                    except:
-                        # Fudging end time
-                        stop = timestr2secs_utc(p['start'][0:8] + '235900' + \
-                                                p['start'][14:18])
-                except EPG_TIME_EXC:
-                    continue
-                guide.sql_add_program(channel_id, title, start, stop,
-                                      subtitle=sub_title, description=desc,
-                                      episode=episode)
-
-            except:
-                log.exception('error in xmltv file')
-    log.info('XMLTV file parsed')
     return True
+    
+
+def update(epg, xmltv_file):
+    thread = kaa.notifier.Thread(_update_parse_xml_thread, epg, xmltv_file)
+    thread.start()
