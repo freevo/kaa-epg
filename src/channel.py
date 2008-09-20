@@ -5,7 +5,7 @@
 # $Id$
 # -----------------------------------------------------------------------------
 # kaa.epg - EPG Database
-# Copyright (C) 2004-2007 Jason Tackaberry, Dirk Meyer, Rob Shortt
+# Copyright (C) 2004-2008 Jason Tackaberry, Dirk Meyer, Rob Shortt
 #
 # First Edition: Jason Tackaberry <tack@sault.org>
 #
@@ -29,6 +29,8 @@
 
 __all__ = [ 'Channel' ]
 
+from kaa import unicode_to_str
+
 class Channel(object):
     """
     kaa.epg.Channel class.
@@ -50,4 +52,4 @@ class Channel(object):
         return self.__getattribute__(attr)
 
     def __repr__(self):
-        return '<kaa.epg.Channel %s>' % self.name
+        return '<kaa.epg.Channel %s>' % unicode_to_str(self.name)

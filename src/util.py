@@ -5,7 +5,7 @@
 # $Id$
 # -----------------------------------------------------------------------------
 # kaa.epg - EPG Database
-# Copyright (C) 2004-2006 Jason Tackaberry, Dirk Meyer, Rob Shortt
+# Copyright (C) 2004,2006,2008 Jason Tackaberry, Dirk Meyer, Rob Shortt
 #
 # First Edition: Dirk Meyer <dischi@freevo.org>
 #
@@ -26,6 +26,8 @@
 # 02110-1301 USA
 #
 # -----------------------------------------------------------------------------
+
+import time
 
 class EPGError(Exception):
     pass

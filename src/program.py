@@ -5,7 +5,7 @@
 # $Id$
 # -----------------------------------------------------------------------------
 # kaa.epg - EPG Database
-# Copyright (C) 2004-2006 Jason Tackaberry, Dirk Meyer, Rob Shortt
+# Copyright (C) 2004-2008 Jason Tackaberry, Dirk Meyer, Rob Shortt
 #
 # First Edition: Jason Tackaberry <tack@sault.org>
 #
@@ -29,22 +29,32 @@
 
 __all__ = [ 'Program' ]
 
+from kaa import unicode_to_str
+from kaa.utils import utc2localtime
+
 class Program(object):
     """
     kaa.epg.Program class.
     """
-    def __init__(self, channel, dbdata):
+    def __init__(self, channel, dbdata, utc):
         self.channel = channel
         self._dbdata = dbdata
+        self._utc = utc
 
     def __getattr__(self, attr):
         """
         Defer accessing the ObjectRow (dbdata) until referenced, as this will
         defer any ObjectRow unpickling.
         """
-        if attr != '_dbdata' and hasattr(self, '_dbdata'):
-            self.start = self._dbdata.get('start', 0)
-            self.stop = self._dbdata.get('stop', 0)
+        if attr != '_dbdata':
+            self.start_utc = self._dbdata.get('start', 0)
+            self.start_local = utc2localtime(self.start_utc)
+            self.stop_utc = self._dbdata.get('stop', 0)
+            self.stop_local = utc2localtime(self.stop_utc)
+            if self._utc:
+                self.start, self.stop = self.start_utc, self.stop_utc
+            else:
+                self.start, self.stop = self.start_local, self.stop_local
             self.title = self._dbdata.get('title', u'')
             self.description = self._dbdata.get('desc', u'')
             self.subtitle = self._dbdata.get('subtitle',  u'')
@@ -57,4 +67,4 @@ class Program(object):
         return self.__getattribute__(attr)
 
     def __repr__(self):
-        return '<kaa.epg.Program %s>' % self.title
+        return '<kaa.epg.Program %s>' % unicode_to_str(self.title)

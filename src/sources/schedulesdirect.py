@@ -40,10 +40,10 @@ import urlparse
 
 # kaa imports
 import kaa
-from config_schedulesdirect import config
+import config
 
 # get logging object
-log = logging.getLogger('epg')
+log = logging.getLogger('epg.schedulesdirect')
 
 def H(m):
     return md5.md5(m).hexdigest()
@@ -327,7 +327,6 @@ class Handler(xml.sax.handler.ContentHandler):
 @kaa.threaded('epg')
 def update(epg, start = None, stop = None):
     from gzip import GzipFile
-    from kaa.epg.config import config as epg_config
 
     if not start:
         # If start isn't specified, choose current time (rounded down to the
@@ -335,10 +334,10 @@ def update(epg, start = None, stop = None):
         start = int(time.time()) / 3600 * 3600
     if not stop:
         # If stop isn't specified, use config default.
-        stop = start + (24 * 60 * 60 * epg_config.days)
+        stop = start + (24 * 60 * 60 * config.days)
 
-    urlparts = urlparse.urlparse(config.url)
-    filename = request(str(config.username), str(config.password), urlparts[1], urlparts[2], start, stop)
+    urlparts = urlparse.urlparse(config.schedulesdirect.url)
+    filename = request(str(config.schedulesdirect.username), str(config.schedulesdirect.password), urlparts[1], urlparts[2], start, stop)
     #filename = '/tmp/schedulesdirect.xml.gz'
     if not filename:
         return
@@ -346,7 +345,6 @@ def update(epg, start = None, stop = None):
     parser = xml.sax.make_parser()
     handler = Handler(epg)
     parser.setContentHandler(handler)
-    t0=time.time()
 
     # Pass 1: map genres to program ids
     handler.handle_elements('programGenre', 'genre')
@@ -357,6 +355,4 @@ def update(epg, start = None, stop = None):
     parser.parse(GzipFile(filename))
 
     os.unlink(filename)
-    epg.add_program_wait()
-    log.info('schedulesdirect XML parsing took %.03f seconds' % (time.time() - t0))
     return True
