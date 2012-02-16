@@ -91,7 +91,9 @@ class Guide(object):
             # A critical rating for the show/film.  Should be out of 4.0.
             score = (float, ATTR_SEARCHABLE),
             # Bitmask for the kaa.epg.Program.FLAG_* constants
-            flags = (int, ATTR_SEARCHABLE)
+            flags = (int, ATTR_SEARCHABLE),
+            # List of credits (type, name, role)
+            credits = (list, ATTR_SIMPLE)
         )
         self._sync()
 

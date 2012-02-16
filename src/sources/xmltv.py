@@ -26,7 +26,6 @@
 # 02110-1301 USA
 #
 # -----------------------------------------------------------------------------
-
 __all__ = [ 'config', 'update' ]
 
 # python imports
@@ -44,6 +43,8 @@ import kaa
 # config file
 from config_xmltv import config as sourcecfg
 from config import config
+
+from kaa.epg.program import Program
 
 # get logging object
 log = logging.getLogger('epg.xmltv')
@@ -155,9 +156,25 @@ class XmltvParser(object):
             stop = attrs.get('stop',None)
             self._dict['stop'] = stop
             self._dict['channel_id'] = attrs.get('channel',None)
+            self._dict['flags'] = 0
         elif name == 'category':
             self._dict.setdefault('genres', []).append(u'')
             self._current = name
+        elif name == 'credits':
+            self._dict['credits'] = []
+        elif name in ('director', 'actor', 'writer', 'adapter', 'producer', 'composer', 'editor', \
+                      'presenter', 'commentator', 'guest'):
+            self._dict['credits'].append([name, '', attrs.get('role', u'')])
+            self._current = 'credit'
+        elif name == 'previously-shown':
+            self._dict['flags'] |= Program.FLAG_PREVIOUSLY_SHOWN
+        elif name == 'premiere':
+            self._dict['flags'] |= Program.FLAG_PREMIERE
+        elif name == 'last-chance':
+            self._dict['flags'] |= Program.FLAG_LAST_CHANCE
+        elif name == 'subtitles':
+            if attrs['type'] == 'teletext':
+                self._dict['flags'] |= Program.FLAG_CC
         elif name in self.mapping:
             # translate element name using self.mapping
             name = self.mapping[name]
@@ -176,6 +193,8 @@ class XmltvParser(object):
                 self._dict['display-name'][-1] += ch
             elif self._current == 'category':
                 self._dict['genres'][-1] += ch
+            elif self._current == 'credit':
+                self._dict['credits'][-1][1] += ch
             else:
                 self._dict[self._current] += ch
 
@@ -225,7 +244,7 @@ class XmltvParser(object):
         if not channel:
             channel = channel_id
             
-        db_id = self.add_channel(tuner_id=channel, name=station, long_name=name)
+        db_id = self.add_channel(tuner_id=channel_id, name=station, long_name=name)
         self.channels[attr['channel_id']] = [db_id, None]
 
     def handle_programme(self, attr):
@@ -249,6 +268,8 @@ class XmltvParser(object):
                 attr['date'] = int(time.mktime(time.strptime(date, '%Y-%m-%d')))
         except KeyError:
             pass
+        except:
+            log.error('Exception while processing date', exc_info=True)
         # then the start time
         start = timestr2secs_utc(attr.pop('start'))
         # stop time is more complicated, as it is not always given

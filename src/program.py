@@ -46,6 +46,12 @@ class Program(object):
     FLAG_NEW = 2
     #: If closed captioning is available for the program.
     FLAG_CC = 4
+    # If the program is premiere
+    FLAG_PREMIERE = 8
+    # If this is the last chance to see the program
+    FLAG_LAST_CHANCE = 16
+    # If this program has been previously shown
+    FLAG_PREVIOUSLY_SHOWN = 32
 
     def __init__(self, channel, dbdata):
         self.channel = channel
@@ -75,6 +81,7 @@ class Program(object):
             self.rating = self._dbdata.get('rating')
             self.score = self._dbdata.get('score')
             self.flags = self._dbdata.get('flags')
+            self.credits = self._dbdata.get('credits')
             del self._dbdata
         return self.__getattribute__(attr)
 
