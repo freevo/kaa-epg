@@ -84,6 +84,12 @@ def get_channel(name):
     """
     return guide.get_channel(name)
 
+def get_channel_by_tuner_id(tuner_id):
+    """
+    Return the channel with the given tuner id.
+    """
+    return guide.get_channel_by_tuner_id(tuner_id)
+
 def search(channel=None, time=None, cls=Program, **kwargs):
     """
     Search the db.
