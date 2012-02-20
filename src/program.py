@@ -83,6 +83,7 @@ class Program(object):
             self.flags = self._dbdata.get('flags')
             self.credits = self._dbdata.get('credits')
             self.date = self._dbdata.get('date')
+            self.year = self._dbdata.get('year')
             del self._dbdata
         return self.__getattribute__(attr)
 
