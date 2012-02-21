@@ -204,7 +204,6 @@ class Server(object):
     Server class for the epg.
     """
     def __init__(self, guide, address, secret):
-        print guide.num_programs
         self._clients = []
         # initial sync
         self.guide = guide
