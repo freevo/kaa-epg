@@ -42,7 +42,7 @@ import kaa.dateutils
 from channel import Channel
 from program import Program
 from guide import Guide
-from util import EPGError
+from util import EPGError, cmp_channel
 
 # get logging object
 log = logging.getLogger('epg')
@@ -54,6 +54,7 @@ class Client(Guide):
 
     def __init__(self, address, secret):
         self.connected = False
+        self._num_programs = 0
         self._channels_by_name = {}
         self._channels_by_db_id = {}
         self._channels_by_tuner_id = {}
@@ -74,10 +75,11 @@ class Client(Guide):
         self.signals["disconnected"].emit()
 
     @kaa.rpc.expose()
-    def _sync(self, channels):
+    def _sync(self, channels, num_programs):
         """
         Connect from server
         """
+        self._num_programs = num_programs
         self._channels_by_name = {}
         self._channels_by_db_id = {}
         self._channels_by_tuner_id = {}
@@ -180,12 +182,29 @@ class Client(Guide):
             raise EPGError('Client is not connected')
         return self.channel.rpc('update')
 
+    @kaa.coroutine()
+    def get_keywords(self, associated=None, prefix=None):
+        if self.channel.status == kaa.rpc.DISCONNECTED:
+            raise EPGError('Client is not connected')
+        result = yield self.channel.rpc('get_keywords', associated, prefix)
+        yield result
+
+    @kaa.coroutine()
+    def get_genres(self, associated=None, prefix=None):
+        if self.channel.status == kaa.rpc.DISCONNECTED:
+            raise EPGError('Client is not connected')
+        result = yield self.channel.rpc('get_genres', associated, prefix)
+        yield result
+
+
+
 
 class Server(object):
     """
     Server class for the epg.
     """
     def __init__(self, guide, address, secret):
+        print guide.num_programs
         self._clients = []
         # initial sync
         self.guide = guide
@@ -219,7 +238,7 @@ class Server(object):
         """
         Connect a new client to the server.
         """
-        client.rpc('_sync', self.guide._channels_by_name.values())
+        client.rpc('_sync', self.guide._channels_by_name.values(), self.guide._num_programs)
         client.signals['closed'].connect(self.client_closed, client)
         self._clients.append(client)
 

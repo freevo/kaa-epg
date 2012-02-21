@@ -121,7 +121,7 @@ class Guide(object):
                 else:
                     self._channels_by_tuner_id[t] = chan
 
-
+    @kaa.coroutine()
     def search(self, channel=None, time=None, cls=Program, **kwargs):
         """
         Search the EPG for programs.
@@ -213,7 +213,7 @@ class Guide(object):
             [ combine_attrs(row) for row in query_data ]
         if cls is None:
             # return raw data:
-            return query_data
+            yield query_data
 
         # Convert raw search result data from the server into python objects.
         results = []
@@ -224,7 +224,7 @@ class Guide(object):
                     continue
                 channel = self._channels_by_db_id[row['parent_id']]
             results.append(cls(channel, row))
-        return results
+        yield results
 
     def new_channel(self, tuner_id=None, name=None, long_name=None):
         """
@@ -284,18 +284,20 @@ class Guide(object):
         kaa.MainThreadCallable(self._sync)()
 
 
+    @kaa.coroutine()
     def get_keywords(self, associated=None, prefix=None):
         """
         Retrieves a list of keywords in the database.
         """
-        return self._db.get_inverted_index_terms('keywords', associated, prefix)
+        yield self._db.get_inverted_index_terms('keywords', associated, prefix)
 
 
+    @kaa.coroutine()
     def get_genres(self, associated=None, prefix=None):
         """
         Retrieves a list of genres in the database.
         """
-        return self._db.get_inverted_index_terms('genres', associated, prefix)
+        yield self._db.get_inverted_index_terms('genres', associated, prefix)
 
     @property
     def num_programs(self):
