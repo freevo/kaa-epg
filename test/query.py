@@ -5,9 +5,9 @@ import kaa.epg
 def local():
     print 'Starting'
     kaa.epg.load('test.db')
-    print kaa.epg.get_channels()
+    channels = kaa.epg.get_channels()
     t1 = time.time()
-    result = kaa.epg.search(time=(time.time(), time.time() + 60*60)).wait()
+    result = kaa.epg.search(channel=channels[:2],time=(time.time(), time.time() + 60*60)).wait()
     t2 = time.time()
     for r in result:
         print r.title, r.channel
@@ -39,9 +39,8 @@ def rpc():
     print result
 
 
-if 0:
-    rpc()
-    kaa.main.run()
+if 1:
+    rpc().wait()
 
 if 1:
     local()

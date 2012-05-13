@@ -95,6 +95,7 @@ class Guide(object):
             # List of credits (type, name, role)
             credits = (list, ATTR_SIMPLE)
         )
+        self._grid_callbacks = []
         self._sync()
 
 
@@ -226,6 +227,87 @@ class Guide(object):
             results.append(cls(channel, row))
         yield results
 
+    @kaa.coroutine()
+    def get_grid(self, channels, start_time, end_time, cls=Program):
+        """
+        Retrieve programs between the specified start and end time that are
+        part of the specified channels.
+
+        :param channels: Indicates the channels within which to search for
+                        programs.  Channels are specified by :class:`~kaa.epg.Channel`
+                        objects.
+        :type channels: list of :class:`~kaa.epg.Channel` objects
+        :param start_time: Specifies the start of the time range within which
+                           to search.
+        :type start_time: int or float, datetime.
+        :param end_time: Specifies the end of the time range within which
+                           to search.
+        :type end_time: int or float, datetime.
+        :param cls: Class used for program results.  The default is to return
+                    :class:`~kaa.epg.Program` objects.  If None is given,
+                    the raw query data (from kaa.db) is returned.
+        :return: a list of lists of :class:`~kaa.epg.Program` objects (or tuple
+                 of raw database rows and meta objects if ``cls=None``)
+                 matching the search criteria.
+
+        The return :class:`~kaa.epg.Program` objects will have an additional
+        'meta' attribute that will include any additional information supplied
+        by the registered grid callback functions.
+        """
+        programs = yield self.search(channel=channels, time=(start_time,end_time), cls=None)
+        results = []
+        for c in channels:
+            results.append([])
+        channel = None
+        i = 0
+        for row in programs:
+            # Populate the meta object
+            meta = Meta()
+            for callback in self._grid_callbacks:
+                callback(row['id'], meta)
+
+            # Find the channel index to add this program to.
+
+            if not channel or row['parent_id'] != channel.db_id:
+                for i,c in enumerate(channels):
+                    if row['parent_id'] == c.db_id:
+                        channel = c
+                        break
+
+            if cls is None:
+                to_add = (row, meta)
+            else:
+                to_add = cls(channel, row)
+                to_add.meta = meta
+
+            results[i].append(to_add)
+        yield results
+
+    def register_grid_callback(self, callback):
+        """
+        Registers a callback that will be invoked when get_grid is called to
+        add additional information to the program, for example whether the
+        program is scheduled to record, or whether it is a favorite.
+
+        :param callback: Function which takes a Program id and a reference to a
+                         :class:`Meta` object to which any additional
+                         information should be added.
+        :type callback: function(db_id, meta)
+        """
+        self._grid_callbacks.append(callback)
+
+    def unregister_grid_callback(self, callback):
+        """
+        Unregisters a callback function that was registered with
+        :meth:`register_grid_callback`.
+
+        :param callback: Function which takes a Program id and a reference to a
+                         :class:`Meta` object to which any additional
+                         information should be added.
+        :type callback: function(db_id, meta)
+        """
+        self._grid_callbacks.remove(callback)
+
     def new_channel(self, tuner_id=None, name=None, long_name=None):
         """
         Returns a channel object that is not associated with the EPG.
@@ -302,3 +384,7 @@ class Guide(object):
     @property
     def num_programs(self):
         return self._num_programs
+
+class Meta(object):
+    """Class used to hold additional information provided by the get_grid callbacks"""
+    pass

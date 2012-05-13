@@ -96,6 +96,13 @@ def search(channel=None, time=None, cls=Program, **kwargs):
     """
     return guide.search(channel, time, cls, **kwargs)
 
+def get_grid(channels, start_time, end_time, cls=Program):
+    """
+    Get a grid of programs.
+    """
+    return guide.get_grid(channels, start_time, end_time, cls)
+
+
 def get_keywords(associated=None, prefix=None):
     """
     Retrieves a list of keywords in the database.
