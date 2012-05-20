@@ -2,11 +2,11 @@ import time
 import kaa.epg
 
 
-def callback(id, meta):
-    meta.test = 'db_id : %d' % id
+def callback(id, extrainfo):
+    extrainfo['test'] = 'db_id : %d' % id
 
 guide = kaa.epg.load('test.db')
-guide.register_grid_callback(callback)
+guide.register_program_callback(callback)
 
 print kaa.epg.get_channels()
 

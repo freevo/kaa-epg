@@ -41,7 +41,7 @@ import kaa.dateutils
 # kaa.epg imports
 from channel import Channel
 from program import Program
-from guide import Guide
+from guide import Guide, to_timestamp
 from util import EPGError, cmp_channel
 
 # get logging object
@@ -148,66 +148,15 @@ class Client(Guide):
         # local timezone set.
         if time is not None:
             if isinstance(time, (tuple, list)):
-                time = convert_to_timestamp(time[0]), convert_to_timestamp(time[1])
+                time = to_timestamp(time[0]), to_timestamp(time[1])
             else:
-                time = convert_to_timestamp(time)
-        query_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
+                time = to_timestamp(time)
+        query_data,extra_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
+        if cls is None:
+            yield  query_data,extra_data
         # Convert raw search result data from the server into python objects.
-        results = []
-        channel = None
-        for row in query_data:
-            if not channel or row['parent_id'] != channel.db_id:
-                if row['parent_id'] not in self._channels_by_db_id:
-                    continue
-                channel = self._channels_by_db_id[row['parent_id']]
-            results.append(cls(channel, row))
-        yield results
+        yield self._rows_to_programs(cls, query_data, extra_data)
 
-    @kaa.coroutine()
-    def get_grid(self, channels, start_time, end_time, cls=Program):
-        """
-        Retrieve programs between the specified start and end time that are
-        part of the specified channels.
-
-        :param channels: Indicates the channels within which to search for
-                        programs.  Channels are specified by :class:`~kaa.epg.Channel`
-                        objects.
-        :type channels: list of :class:`~kaa.epg.Channel` objects
-        :param start_time: Specifies the start of the time range within which
-                           to search.
-        :type start_time: int or float, datetime.
-        :param end_time: Specifies the end of the time range within which
-                           to search.
-        :type end_time: int or float, datetime.
-        :param cls: Class used for program results.  The default is to return
-                    :class:`~kaa.epg.Program` objects.  If None is given,
-                    the raw query data (from kaa.db) is returned.
-        :return: a list of lists of :class:`~kaa.epg.Program` objects (or tuple
-                 of raw database rows and meta objects if ``cls=None``)
-                 matching the search criteria.
-
-        The return :class:`~kaa.epg.Program` objects will have an additional
-        'meta' attribute that will include any additional information supplied
-        by the registered grid callback functions.
-        """
-
-        rpc_results = yield self.channel.rpc('get_grid', channels, convert_to_timestamp(start_time),
-                                convert_to_timestamp(end_time), None)
-        # Convert raw search result data from the server into python objects.
-        results = []
-        channel = None
-        for channel_rows in rpc_results:
-            channel_results = []
-            for row,meta in channel_rows:
-                if not channel or row['parent_id'] != channel.db_id:
-                    if row['parent_id'] not in self._channels_by_db_id:
-                        continue
-                    channel = self._channels_by_db_id[row['parent_id']]
-                p = cls(channel, row)
-                p.meta = meta
-                channel_results.append(p)
-            results.append(channel_results)
-        yield results
 
     def update(self):
         """
@@ -287,14 +236,3 @@ class Server(object):
         log.info('Client disconnected: %s', client)
         self._clients.remove(client)
 
-
-def convert_to_timestamp(dt):
-    'Converts a time to a unix timestamp (seconds since epoch UTC)'
-    import time as _time
-    if isinstance(dt, (int, float, long)):
-        return dt
-    if not dt.tzinfo:
-        # No tzinfo, treat as localtime.
-        return _time.mktime(dt.timetuple())
-        # tzinfo present, convert to local tz (which is what time.mktime wants)
-    return _time.mktime(dt.astimezone(kaa.dateutils.local).timetuple())

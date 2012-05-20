@@ -95,7 +95,7 @@ class Guide(object):
             # List of credits (type, name, role)
             credits = (list, ATTR_SIMPLE)
         )
-        self._grid_callbacks = []
+        self._program_callbacks = []
         self._sync()
 
 
@@ -177,17 +177,6 @@ class Guide(object):
             if isinstance(channel, (tuple, list)):
                 kwargs["parent"] = [ ("channel", c.db_id) for c in channel ]
 
-        def convert(dt):
-            'Converts a time to a unix timestamp (seconds since epoch UTC)'
-            import time as _time
-            if isinstance(dt, (int, float, long)):
-                return dt
-            if not dt.tzinfo:
-                # No tzinfo, treat as localtime.
-                return _time.mktime(dt.timetuple())
-            # tzinfo present, convert to local tz (which is what time.mktime wants)
-            return _time.mktime(dt.astimezone(kaa.dateutils.local).timetuple())
-
         if time is not None:
             # Find all programs currently playing at (or within) the given
             # time(s).  We push in the boundaries by 1 second as a heuristic to
@@ -195,9 +184,9 @@ class Guide(object):
             # 2 programs.  e.g. if program A ends at 15:00 and B starts at 15:00,
             # searching for start=15:00 should return B and not A.
             if isinstance(time, (tuple, list)):
-                start, stop = convert(time[0]) + 1, convert(time[1]) - 1
+                start, stop = to_timestamp(time[0]) + 1, to_timestamp(time[1]) - 1
             else:
-                start = stop = convert(time) + 1
+                start = stop = to_timestamp(time) + 1
             
             if stop > 0:
                 kwargs["start"] = QExpr("range", (int(start) - self._max_program_length, int(stop)))
@@ -212,101 +201,55 @@ class Guide(object):
             def combine_attrs(row):
                 return [ row.get(a) for a in attrs ]
             [ combine_attrs(row) for row in query_data ]
+        extra_data = None
+        if self._program_callbacks:
+            extra_data = []
+            for row in query_data:
+                extra_info = {}
+                for callback in self._program_callbacks:
+                    callback(row['id'], extra_info)
+                extra_data.append(extra_info)
         if cls is None:
             # return raw data:
-            yield query_data
+            yield query_data, extra_data
 
         # Convert raw search result data from the server into python objects.
+        yield self._rows_to_programs(cls, query_data, extra_data)
+
+    def _rows_to_programs(self, cls, query_data, extra_data):
         results = []
-        channel = None
-        for row in query_data:
-            if not channel or row['parent_id'] != channel.db_id:
-                if row['parent_id'] not in self._channels_by_db_id:
-                    continue
-                channel = self._channels_by_db_id[row['parent_id']]
-            results.append(cls(channel, row))
-        yield results
-
-    @kaa.coroutine()
-    def get_grid(self, channels, start_time, end_time, cls=Program):
-        """
-        Retrieve programs between the specified start and end time that are
-        part of the specified channels.
-
-        :param channels: Indicates the channels within which to search for
-                        programs.  Channels are specified by :class:`~kaa.epg.Channel`
-                        objects.
-        :type channels: list of :class:`~kaa.epg.Channel` objects
-        :param start_time: Specifies the start of the time range within which
-                           to search.
-        :type start_time: int or float, datetime.
-        :param end_time: Specifies the end of the time range within which
-                           to search.
-        :type end_time: int or float, datetime.
-        :param cls: Class used for program results.  The default is to return
-                    :class:`~kaa.epg.Program` objects.  If None is given,
-                    the raw query data (from kaa.db) is returned.
-        :return: a list of lists of :class:`~kaa.epg.Program` objects (or tuple
-                 of raw database rows and meta objects if ``cls=None``)
-                 matching the search criteria.
-
-        The return :class:`~kaa.epg.Program` objects will have an additional
-        'meta' attribute that will include any additional information supplied
-        by the registered grid callback functions.
-        """
-        programs = yield self.search(channel=channels, time=(start_time,end_time), cls=None)
-        results = []
-        for c in channels:
-            results.append([])
-        channel = None
-        i = 0
-        for row in programs:
-            # Populate the meta object
-            meta = Meta()
-            for callback in self._grid_callbacks:
-                callback(row['id'], meta)
-
-            # Find the channel index to add this program to.
-
-            if not channel or row['parent_id'] != channel.db_id:
-                for i,c in enumerate(channels):
-                    if row['parent_id'] == c.db_id:
-                        channel = c
-                        break
-
-            if cls is None:
-                to_add = (row, meta)
+        for i,row in enumerate(query_data):
+            channel = self._channels_by_db_id[row['parent_id']]
+            if extra_data is None:
+                extra_info = None
             else:
-                to_add = cls(channel, row)
-                to_add.meta = meta
+                extra_info = extra_data[i]
+            results.append(cls(channel, row, extra_info))
+        return results
 
-            results[i].append(to_add)
-        yield results
-
-    def register_grid_callback(self, callback):
+    def register_program_callback(self, callback):
         """
-        Registers a callback that will be invoked when get_grid is called to
+        Registers a callback that will be invoked when :meth:`search` is called to
         add additional information to the program, for example whether the
         program is scheduled to record, or whether it is a favorite.
 
         :param callback: Function which takes a Program id and a reference to a
-                         :class:`Meta` object to which any additional
-                         information should be added.
-        :type callback: function(db_id, meta)
+                         dict object to which any additional information should
+                         be added.
+        :type callback: function(db_id, extra_info)
         """
-        self._grid_callbacks.append(callback)
+        self._program_callbacks.append(callback)
 
-    def unregister_grid_callback(self, callback):
+    def unregister_program_callback(self, callback):
         """
         Unregisters a callback function that was registered with
-        :meth:`register_grid_callback`.
+        :meth:`register_program_callback`.
 
-        :param callback: Function which takes a Program id and a reference to a
-                         :class:`Meta` object to which any additional
-                         information should be added.
-        :type callback: function(db_id, meta)
+        :param callback: Function which was previously registered with
+                         :meth:`register_program_callback`.
+        :type callback: function(db_id, extra_info)
         """
-        self._grid_callbacks.remove(callback)
+        self._progam_callbacks.remove(callback)
 
     def new_channel(self, tuner_id=None, name=None, long_name=None):
         """
@@ -385,6 +328,8 @@ class Guide(object):
     def num_programs(self):
         return self._num_programs
 
-class Meta(object):
-    """Class used to hold additional information provided by the get_grid callbacks"""
-    pass
+def to_timestamp(dt):
+    'Converts a time to a unix timestamp (seconds since epoch UTC)'
+    if isinstance(dt, (int, float, long)):
+        return dt
+    return kaa.dateutils.to_timestamp(dt)

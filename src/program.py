@@ -53,10 +53,11 @@ class Program(object):
     # If this program has been previously shown
     FLAG_PREVIOUSLY_SHOWN = 32
 
-    def __init__(self, channel, dbdata):
+    def __init__(self, channel, dbdata, extrainfo):
         self.channel = channel
         self._dbdata = dbdata
-
+        if extrainfo:
+            self.__dict__.update(extrainfo)
 
     def __getattr__(self, attr):
         """
