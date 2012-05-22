@@ -2,11 +2,11 @@ import time
 import kaa.epg
 
 
-def callback(id, extrainfo):
-    extrainfo['test'] = 'db_id : %d' % id
+def callback(row, extrainfo):
+    extrainfo['test'] = 'db_id : %d' % row['id']
 
 guide = kaa.epg.load('test.db')
-guide.register_program_callback(callback)
+guide.signals['program-retrieved'].connect(callback)
 
 print kaa.epg.get_channels()
 

@@ -47,11 +47,31 @@ from util import cmp_channel, EPGError
 # get logging object
 log = logging.getLogger('epg')
 
-class Guide(object):
+class Guide(kaa.Object):
     """
     EPG guide with db access.
     """
+    __kaasignals__ = {
+        'program-retrieved':
+            '''
+            Emitted when a program is retrieve from the database.
+
+            .. describe:: def callback(row, extra_info, ...)
+
+               :param row: the program that has been retrieved from the database.
+               :type row: dictionary type object
+
+               :param extra_info: dictionary object to which to add additional info.
+               :type extra_info: dictionary object
+
+            Callbacks can add additional information to the program by adding
+            keys to the extra_info dictionary.
+            '''
+    }
+
+
     def __init__(self, database):
+        super(Guide, self).__init__()
         db_dir = os.path.dirname(database)
         if db_dir and not os.path.isdir(db_dir):
             os.makedirs(db_dir)
@@ -95,7 +115,6 @@ class Guide(object):
             # List of credits (type, name, role)
             credits = (list, ATTR_SIMPLE)
         )
-        self._program_callbacks = []
         self._sync()
 
 
@@ -201,14 +220,16 @@ class Guide(object):
             def combine_attrs(row):
                 return [ row.get(a) for a in attrs ]
             [ combine_attrs(row) for row in query_data ]
-        extra_data = None
-        if self._program_callbacks:
+
+        if len(self.signals['program-retrieved']):
             extra_data = []
             for row in query_data:
                 extra_info = {}
-                for callback in self._program_callbacks:
-                    callback(row['id'], extra_info)
+                self.signals['program-retrieved'].emit(row, extra_info)
                 extra_data.append(extra_info)
+        else:
+            extra_data = None
+
         if cls is None:
             # return raw data:
             yield query_data, extra_data
@@ -219,37 +240,12 @@ class Guide(object):
     def _rows_to_programs(self, cls, query_data, extra_data):
         results = []
         for i,row in enumerate(query_data):
-            channel = self._channels_by_db_id[row['parent_id']]
-            if extra_data is None:
-                extra_info = None
+            if row['parent_id'] in self._channels_by_db_id:
+                channel = self._channels_by_db_id[row['parent_id']]
             else:
-                extra_info = extra_data[i]
-            results.append(cls(channel, row, extra_info))
+                continue
+            results.append(cls(channel, row, extra_data[i] if extra_data else None))
         return results
-
-    def register_program_callback(self, callback):
-        """
-        Registers a callback that will be invoked when :meth:`search` is called to
-        add additional information to the program, for example whether the
-        program is scheduled to record, or whether it is a favorite.
-
-        :param callback: Function which takes a Program id and a reference to a
-                         dict object to which any additional information should
-                         be added.
-        :type callback: function(db_id, extra_info)
-        """
-        self._program_callbacks.append(callback)
-
-    def unregister_program_callback(self, callback):
-        """
-        Unregisters a callback function that was registered with
-        :meth:`register_program_callback`.
-
-        :param callback: Function which was previously registered with
-                         :meth:`register_program_callback`.
-        :type callback: function(db_id, extra_info)
-        """
-        self._progam_callbacks.remove(callback)
 
     def new_channel(self, tuner_id=None, name=None, long_name=None):
         """
@@ -329,7 +325,9 @@ class Guide(object):
         return self._num_programs
 
 def to_timestamp(dt):
-    'Converts a time to a unix timestamp (seconds since epoch UTC)'
+    """
+    Converts a time to a unix timestamp (seconds since epoch UTC)
+    """
     if isinstance(dt, (int, float, long)):
         return dt
     return kaa.dateutils.to_timestamp(dt)

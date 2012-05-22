@@ -5,10 +5,10 @@ import kaa.epg
 
 
 def local():
-    def callback(id, extrainfo):
-        extrainfo['test'] = 'db_id : %d' % id
+    def callback(row, extrainfo):
+        extrainfo['test'] = 'db_id : %d' % row['id']
     guide = kaa.epg.load('test.db')
-    guide.register_program_callback(callback)
+    guide.signals['program-retrieved'].connect(callback)
 
 
 @kaa.coroutine()
@@ -37,11 +37,11 @@ def test():
         print
 
 
-if 0:
+if 1:
     print 'Local'
     local()
 
-if 1:
+if 0:
     print 'Remote'
     remote().wait()
 

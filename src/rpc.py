@@ -151,9 +151,9 @@ class Client(Guide):
                 time = to_timestamp(time[0]), to_timestamp(time[1])
             else:
                 time = to_timestamp(time)
-        query_data,extra_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
+        query_data, extra_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
         if cls is None:
-            yield  query_data,extra_data
+            yield  query_data, extra_data
         # Convert raw search result data from the server into python objects.
         yield self._rows_to_programs(cls, query_data, extra_data)
 
@@ -203,10 +203,6 @@ class Server(object):
         return self.guide.search(channel, time, cls, **kwargs)
 
     @kaa.rpc.expose()
-    def get_grid(self, channels, start_time, end_time, cls):
-        return self.guide.get_grid(channels, start_time, end_time, cls)
-
-    @kaa.rpc.expose()
     def get_keywords(self, associated=None, prefix=None):
         return self.guide.get_keywords(associated, prefix)
 
@@ -225,6 +221,7 @@ class Server(object):
         """
         Connect a new client to the server.
         """
+        log.info('Client connected: %s', client)
         client.rpc('_sync', self.guide._channels_by_name.values(), self.guide._num_programs)
         client.signals['closed'].connect(self.client_closed, client)
         self._clients.append(client)
@@ -235,4 +232,3 @@ class Server(object):
         """
         log.info('Client disconnected: %s', client)
         self._clients.remove(client)
-
