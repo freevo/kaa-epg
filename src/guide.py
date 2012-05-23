@@ -47,11 +47,31 @@ from util import cmp_channel, EPGError
 # get logging object
 log = logging.getLogger('epg')
 
-class Guide(object):
+class Guide(kaa.Object):
     """
     EPG guide with db access.
     """
+    __kaasignals__ = {
+        'program-retrieved':
+            '''
+            Emitted when a program is retrieve from the database.
+
+            .. describe:: def callback(row, extra_info, ...)
+
+               :param row: the program that has been retrieved from the database.
+               :type row: dictionary type object
+
+               :param extra_info: dictionary object to which to add additional info.
+               :type extra_info: dictionary object
+
+            Callbacks can add additional information to the program by adding
+            keys to the extra_info dictionary.
+            '''
+    }
+
+
     def __init__(self, database):
+        super(Guide, self).__init__()
         db_dir = os.path.dirname(database)
         if db_dir and not os.path.isdir(db_dir):
             os.makedirs(db_dir)
@@ -176,17 +196,6 @@ class Guide(object):
             if isinstance(channel, (tuple, list)):
                 kwargs["parent"] = [ ("channel", c.db_id) for c in channel ]
 
-        def convert(dt):
-            'Converts a time to a unix timestamp (seconds since epoch UTC)'
-            import time as _time
-            if isinstance(dt, (int, float, long)):
-                return dt
-            if not dt.tzinfo:
-                # No tzinfo, treat as localtime.
-                return _time.mktime(dt.timetuple())
-            # tzinfo present, convert to local tz (which is what time.mktime wants)
-            return _time.mktime(dt.astimezone(kaa.dateutils.local).timetuple())
-
         if time is not None:
             # Find all programs currently playing at (or within) the given
             # time(s).  We push in the boundaries by 1 second as a heuristic to
@@ -194,9 +203,9 @@ class Guide(object):
             # 2 programs.  e.g. if program A ends at 15:00 and B starts at 15:00,
             # searching for start=15:00 should return B and not A.
             if isinstance(time, (tuple, list)):
-                start, stop = convert(time[0]) + 1, convert(time[1]) - 1
+                start, stop = to_timestamp(time[0]) + 1, to_timestamp(time[1]) - 1
             else:
-                start = stop = convert(time) + 1
+                start = stop = to_timestamp(time) + 1
             
             if stop > 0:
                 kwargs["start"] = QExpr("range", (int(start) - self._max_program_length, int(stop)))
@@ -211,20 +220,32 @@ class Guide(object):
             def combine_attrs(row):
                 return [ row.get(a) for a in attrs ]
             [ combine_attrs(row) for row in query_data ]
+
+        if len(self.signals['program-retrieved']):
+            extra_data = []
+            for row in query_data:
+                extra_info = {}
+                self.signals['program-retrieved'].emit(row, extra_info)
+                extra_data.append(extra_info)
+        else:
+            extra_data = None
+
         if cls is None:
             # return raw data:
-            yield query_data
+            yield query_data, extra_data
 
         # Convert raw search result data from the server into python objects.
+        yield self._rows_to_programs(cls, query_data, extra_data)
+
+    def _rows_to_programs(self, cls, query_data, extra_data):
         results = []
-        channel = None
-        for row in query_data:
-            if not channel or row['parent_id'] != channel.db_id:
-                if row['parent_id'] not in self._channels_by_db_id:
-                    continue
+        for i,row in enumerate(query_data):
+            if row['parent_id'] in self._channels_by_db_id:
                 channel = self._channels_by_db_id[row['parent_id']]
-            results.append(cls(channel, row))
-        yield results
+            else:
+                continue
+            results.append(cls(channel, row, extra_data[i] if extra_data else None))
+        return results
 
     def new_channel(self, tuner_id=None, name=None, long_name=None):
         """
@@ -302,3 +323,11 @@ class Guide(object):
     @property
     def num_programs(self):
         return self._num_programs
+
+def to_timestamp(dt):
+    """
+    Converts a time to a unix timestamp (seconds since epoch UTC)
+    """
+    if isinstance(dt, (int, float, long)):
+        return dt
+    return kaa.dateutils.to_timestamp(dt)

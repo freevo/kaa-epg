@@ -41,7 +41,7 @@ import kaa.dateutils
 # kaa.epg imports
 from channel import Channel
 from program import Program
-from guide import Guide
+from guide import Guide, to_timestamp
 from util import EPGError, cmp_channel
 
 # get logging object
@@ -142,37 +142,21 @@ class Client(Guide):
         With the exception of ``keywords`` and ``genres``, a :class:`~kaa.db.QExpr`
         object can be used with any of the above kwargs.
         """
-        def convert(dt):
-            'Converts a time to a unix timestamp (seconds since epoch UTC)'
-            import time as _time
-            if isinstance(dt, (int, float, long)):
-                return dt
-            if not dt.tzinfo:
-                # No tzinfo, treat as localtime.
-                return _time.mktime(dt.timetuple())
-            # tzinfo present, convert to local tz (which is what time.mktime wants)
-            return _time.mktime(dt.astimezone(kaa.dateutils.local).timetuple())
-
         if self.channel.status == kaa.rpc.DISCONNECTED:
             raise EPGError('Client is not connected')
         # convert to UTC because the server may have a different
         # local timezone set.
         if time is not None:
             if isinstance(time, (tuple, list)):
-                time = convert(time[0]), convert(time[1])
+                time = to_timestamp(time[0]), to_timestamp(time[1])
             else:
-                time = convert(time)
-        query_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
+                time = to_timestamp(time)
+        query_data, extra_data = yield self.channel.rpc('search', channel, time, None, **kwargs)
+        if cls is None:
+            yield  query_data, extra_data
         # Convert raw search result data from the server into python objects.
-        results = []
-        channel = None
-        for row in query_data:
-            if not channel or row['parent_id'] != channel.db_id:
-                if row['parent_id'] not in self._channels_by_db_id:
-                    continue
-                channel = self._channels_by_db_id[row['parent_id']]
-            results.append(cls(channel, row))
-        yield results
+        yield self._rows_to_programs(cls, query_data, extra_data)
+
 
     def update(self):
         """
@@ -237,6 +221,7 @@ class Server(object):
         """
         Connect a new client to the server.
         """
+        log.info('Client connected: %s', client)
         client.rpc('_sync', self.guide._channels_by_name.values(), self.guide._num_programs)
         client.signals['closed'].connect(self.client_closed, client)
         self._clients.append(client)
